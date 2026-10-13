@@ -1,0 +1,1319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NOVA - GROUND STATION</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<style>
+  :root{
+    --bg-void:#030507;
+    --bg-panel:#090d12;
+    --bg-panel-alt:#0c1218;
+    --bg-inset:#050809;
+    --grid-line: rgba(0, 128, 255, 0.045);
+    --border-dim: rgba(0,224,255,0.14);
+    --border-bright: rgba(0,224,255,0.4);
+    --accent:#0055ff;
+    --accent-soft: rgba(0,224,255,0.55);
+    --accent-dim: rgba(0,224,255,0.12);
+    --warn:#ffa726;
+    --warn-dim: rgba(255,167,38,0.15);
+    --crit:#ff3b30;
+    --crit-dim: rgba(255,59,48,0.18);
+    --ok:#3ddc84;
+    --text-hi:#d9f7ff;
+    --text-mid:#82aab5;
+    --text-dim:#3f5a64;
+    --mono: 'JetBrains Mono','IBM Plex Mono','Consolas','SFMono-Regular',ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0;padding:0;height:100%;background:var(--bg-void);
+    color:var(--text-hi);font-family:var(--mono);
+    -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+  }
+  body{
+    background-image:
+      linear-gradient(var(--grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+    background-size:28px 28px;
+  }
+  ::selection{background:var(--accent);color:#00131a;}
+
+  /* ---------- shared panel chrome ---------- */
+  .panel{
+    background:linear-gradient(180deg, var(--bg-panel), var(--bg-panel-alt));
+    border:1px solid var(--border-dim);
+    border-radius:3px;
+    position:relative;
+    display:flex;flex-direction:column;
+    min-height:0;
+    overflow:hidden;
+  }
+  .panel::before{
+    content:"";position:absolute;inset:0;pointer-events:none;
+  }
+  .panel-head{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:6px 10px;border-bottom:1px solid var(--border-dim);
+    background:rgba(0,224,255,0.025);
+    flex:0 0 auto;
+  }
+  .panel-title{
+    font-size:10.5px;letter-spacing:1.5px;color:var(--accent);font-weight:600;
+    display:flex;align-items:center;gap:7px;
+  }
+  .panel-title .dot{width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 5px var(--accent);}
+  .panel-tag{font-size:8.5px;color:var(--text-dim);letter-spacing:1px;}
+  .panel-body{flex:1 1 auto;min-height:0;padding:10px;overflow:hidden;position:relative;}
+
+  /* ---------- app grid ---------- */
+  .app{
+    height:100vh;width:100vw;
+    display:grid;
+    grid-template-columns: 232px 1fr 272px 320px;
+    grid-template-rows: 42px 1fr 208px 152px;
+    gap:8px;
+    padding:8px;
+  }
+  .header{grid-area:1 / 1 / 2 / 5;}
+  .flight{grid-area:2 / 1 / 3 / 2;}
+  .telemetry{grid-area:3 / 1 / 4 / 2;}
+  .rocket{grid-area:2 / 2 / 4 / 3;}
+  .radio{grid-area:2 / 3 / 3 / 4;}
+  .log{grid-area:3 / 3 / 4 / 4;}
+  .map{grid-area:2 / 4 / 4 / 5;}
+  .graphs{grid-area:4 / 1 / 5 / 5;}
+
+  /* ---------- header ---------- */
+  .header{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:0 14px;
+    background:linear-gradient(180deg,#0a1015,#080b0e);
+    border:1px solid var(--border-dim);border-radius:3px;
+  }
+  .brand{display:flex;align-items:center;gap:10px;}
+  .brand .mark{
+    width:20px;height:20px;border:1px solid var(--accent);border-radius:3px;
+    display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--accent);
+    box-shadow:0 0 8px rgba(0,224,255,0.35) inset;
+  }
+  .brand .name{font-size:12.5px;letter-spacing:3px;font-weight:700;color:var(--text-hi);}
+  .brand .name span{color:var(--accent);}
+  .hstat{display:flex;align-items:center;gap:22px;font-size:10px;color:var(--text-mid);letter-spacing:0.5px;}
+  .hstat .item{display:flex;flex-direction:column;gap:1px;}
+  .hstat .label{font-size:8px;color:var(--text-dim);letter-spacing:1px;}
+  .hstat .val{color:var(--text-hi);font-size:11px;font-weight:600;}
+  .hstat .val.ok{color:var(--ok);}
+  .link-active{display:flex;align-items:center;gap:7px;font-size:10.5px;letter-spacing:1.5px;color:var(--ok);}
+  .pulse{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 6px var(--ok);animation:pulse 1.6s infinite;}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.25;}}
+  .divider-v{width:1px;height:20px;background:var(--border-dim);}
+
+  .header-controls{display:flex;align-items:center;gap:10px;}
+  .connect-btn{
+    appearance:none;
+    border:1px solid var(--accent);
+    background:rgba(0,85,255,0.10);
+    color:var(--accent);
+    font-family:var(--mono);
+    font-size:9px;
+    font-weight:700;
+    letter-spacing:1px;
+    padding:7px 10px;
+    border-radius:3px;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+  .connect-btn:hover{background:rgba(0,85,255,0.18);}
+  .connect-btn.connected{
+    border-color:var(--ok);
+    color:var(--ok);
+    background:rgba(61,220,132,0.08);
+  }
+
+  /* ---------- flight status ---------- */
+  .flight-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:0;}
+  .flight-list li{
+    display:flex;align-items:center;gap:8px;padding:7px 6px;
+    font-size:10.5px;letter-spacing:1px;color:var(--text-dim);
+    border-left:2px solid transparent;position:relative;
+  }
+  .flight-list li:not(:last-child)::after{
+    content:"";position:absolute;left:9px;top:24px;bottom:-8px;width:1px;background:var(--border-dim);
+  }
+  .flight-list li .node{width:8px;height:8px;border-radius:50%;border:1px solid var(--text-dim);background:var(--bg-inset);flex:0 0 auto;z-index:1;}
+  .flight-list li.active{color:var(--accent);border-left-color:var(--accent);background:rgba(0,224,255,0.05);}
+  .flight-list li.active .node{background:var(--accent);border-color:var(--accent);box-shadow:0 0 7px var(--accent);}
+  .flight-list li.passed{color:var(--text-mid);}
+  .flight-list li.passed .node{background:var(--text-dim);border-color:var(--text-dim);}
+
+  .sub-events{margin-top:10px;padding-top:10px;border-top:1px solid var(--border-dim);display:flex;flex-direction:column;gap:8px;}
+  .sub-event{display:flex;align-items:center;justify-content:space-between;font-size:10px;letter-spacing:1px;}
+  .sub-event .name{color:var(--text-mid);}
+  .badge{font-size:9px;letter-spacing:1px;padding:2px 7px;border:1px solid var(--border-dim);border-radius:2px;color:var(--text-dim);}
+  .badge.standby{color:var(--text-mid);}
+  .badge.fired{color:var(--crit);border-color:var(--crit);background:var(--crit-dim);}
+
+  /* ---------- telemetry ---------- */
+  .tele-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px 8px;height:100%;}
+  .tele-cell{
+    border:1px solid var(--border-dim);border-radius:2px;padding:4px 8px;
+    background:rgba(0,224,255,0.015);display:flex;flex-direction:column;justify-content:center;gap:1px;
+  }
+  .tele-cell .lbl{font-size:7.5px;letter-spacing:1px;color:var(--text-dim);}
+  .tele-cell .num{font-size:13px;font-weight:700;color:var(--text-hi);}
+  .tele-cell .num small{font-size:8.5px;color:var(--text-mid);font-weight:400;margin-left:2px;}
+  .tele-cell.wide{grid-column:1 / 3;}
+  .tele-cell.accent .num{color:var(--accent);}
+  .triaxis{display:flex;gap:12px;font-size:11.5px;font-weight:700;color:var(--text-hi);}
+  .triaxis b{color:var(--accent);font-weight:700;}
+  .triaxis .ax-lbl{color:var(--text-dim);font-weight:400;font-size:9px;margin-right:2px;}
+
+  /* ---------- rocket viz ---------- */
+  .rocket .panel-body{display:flex;padding:0;}
+  .viz-wrap{flex:1;position:relative;}
+  .axis-label{position:absolute;font-size:9px;letter-spacing:1.5px;color:var(--text-dim);}
+  .attitude-readout{
+    position:absolute;font-size:9.5px;letter-spacing:1px;color:var(--text-mid);
+    display:flex;flex-direction:column;gap:5px;
+  }
+  .attitude-readout .r-lbl{color:var(--text-dim);font-size:8px;}
+  .attitude-readout .r-val{color:var(--accent);font-size:13px;font-weight:700;}
+  .center-crosshair{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);}
+  .flight-vol-label{
+    position:absolute;top:8px;left:12px;font-size:8.5px;letter-spacing:2px;color:var(--text-dim);
+  }
+  .scanline{
+    position:absolute;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--accent-soft),transparent);
+    opacity:0.5;animation:scan 5s linear infinite;
+  }
+  @keyframes scan{0%{top:6%;}100%{top:94%;}}
+
+  /* ---------- radio panel ---------- */
+  .radio-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .radio-cell .lbl{font-size:8px;letter-spacing:1px;color:var(--text-dim);}
+  .radio-cell .num{font-size:13.5px;font-weight:700;color:var(--text-hi);}
+  .radio-cell{border-bottom:1px solid var(--border-dim);padding-bottom:6px;}
+  .sig-wrap{margin-top:10px;height:56px;}
+  .sig-wrap canvas{width:100% !important;height:100% !important;}
+
+  /* ---------- log ---------- */
+  .log-body{
+    font-size:10px;line-height:1.7;color:var(--text-mid);
+    overflow-y:auto;height:100%;
+  }
+  .log-body::-webkit-scrollbar{width:4px;}
+  .log-body::-webkit-scrollbar-thumb{background:var(--border-dim);}
+  .log-line{white-space:nowrap;}
+  .log-line .ts{color:var(--text-dim);}
+  .log-line.warn{color:var(--warn);}
+  .log-line.ok{color:var(--ok);}
+
+  /* ---------- map ---------- */
+  .map .panel-body{padding:0;}
+  #mapCanvas{width:100%;height:100%;display:block;}
+  .map-overlay{
+    position:absolute;top:10px;left:12px;font-size:9px;letter-spacing:1px;color:var(--text-mid);
+    display:flex;flex-direction:column;gap:3px;background:rgba(3,5,7,0.55);padding:6px 8px;border:1px solid var(--border-dim);border-radius:2px;
+  }
+  .map-overlay .coord-lbl{color:var(--text-dim);font-size:8px;}
+  .map-overlay .coord-val{color:var(--accent);font-size:11px;font-weight:700;}
+  .map-legend{
+    position:absolute;bottom:10px;left:12px;font-size:8.5px;letter-spacing:0.5px;color:var(--text-mid);
+    display:flex;flex-direction:column;gap:4px;background:rgba(3,5,7,0.55);padding:6px 8px;border:1px solid var(--border-dim);border-radius:2px;
+  }
+  .map-legend .row{display:flex;align-items:center;gap:6px;}
+  .map-legend .swatch{width:14px;height:0;border-top:2px solid var(--accent);}
+  .map-legend .swatch.dashed{border-top:2px dashed var(--text-mid);}
+  .map-legend .swatch.dot{width:7px;height:7px;border-radius:50%;border:none;background:var(--accent);}
+
+  /* ---------- graphs ---------- */
+  .graphs .panel-body{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:8px 10px;}
+  .graph-cell{
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    border:1px solid var(--border-dim);
+    border-radius:2px;
+    padding:10px 14px;
+    background:rgba(0,224,255,0.012);
+  }
+  .graph-cell .g-head{
+    display:flex;
+    flex-direction:column;
+    align-items:flex-start;
+    justify-content:center;
+    gap:8px;
+    margin:0;
+  }
+  .graph-cell .g-title{
+    font-size:8.5px;
+    letter-spacing:1.5px;
+    color:var(--text-dim);
+  }
+  .graph-cell .g-val{
+    font-size:26px;
+    line-height:1;
+    color:var(--accent);
+    font-weight:700;
+  }
+
+  .sys-labels{position:absolute;bottom:6px;right:10px;font-size:7.5px;letter-spacing:1px;color:var(--text-dim);opacity:0.7;}
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ===================== HEADER ===================== -->
+  <div class="header">
+    <div class="brand">
+      <div class="mark">N</div>
+      <div class="name">NOVA <span>| GROUND STATION |</span></div>
+    </div>
+    <div class="hstat">
+      <div class="item"><span class="label">SYSTEM STATUS</span><span class="val" id="hSysStatus">WAITING</span></div>
+      <div class="divider-v"></div>
+      <div class="item"><span class="label">RADIO LINK</span><span class="val" id="hRadioLink">WAITING</span></div>
+      <div class="divider-v"></div>
+      <div class="item"><span class="label">GPS</span><span class="val" id="hGpsFix">NO FIX</span></div>
+      <div class="divider-v"></div>
+      <div class="item"><span class="label">SATELLITES</span><span class="val" id="hSats">00</span></div>
+      <div class="divider-v"></div>
+      <div class="item"><span class="label">PACKET LOSS</span><span class="val" id="hPloss">0.0%</span></div>
+      <div class="divider-v"></div>
+      <div class="item"><span class="label">MISSION TIME</span><span class="val" id="hMet">00:00:00</span></div>
+    </div>
+    <div class="header-controls">
+      <button class="connect-btn" id="connectSerialBtn" type="button">CONNECT GROUND STATION</button>
+      <div class="link-active" id="linkState" style="color:var(--text-mid);"><span class="pulse" id="linkPulse" style="background:var(--text-dim);box-shadow:none;animation:none;"></span> WAITING</div>
+    </div>
+  </div>
+
+  <!-- ===================== FLIGHT STATE ===================== -->
+  <div class="panel flight">
+    <div class="panel-head">
+      <div class="panel-title"><span class="dot"></span>FLIGHT STATE</div>
+      <div class="panel-tag">FLT-01</div>
+    </div>
+    <div class="panel-body">
+      <ul class="flight-list" id="flightList">
+        <li class="active" data-state="PAD"><span class="node"></span>PAD</li>
+        <li data-state="BOOST"><span class="node"></span>BOOST</li>
+        <li data-state="COAST"><span class="node"></span>COAST</li>
+        <li data-state="APOGEE"><span class="node"></span>APOGEE</li>
+        <li data-state="DROGUE"><span class="node"></span>DROGUE</li>
+        <li data-state="MAIN"><span class="node"></span>MAIN</li>
+        <li data-state="LANDED"><span class="node"></span>LANDED</li>
+      </ul>
+      <div class="sub-events">
+        <div class="sub-event"><span class="name">DROGUE</span><span class="badge standby" id="drogueBadge">STANDBY</span></div>
+        <div class="sub-event"><span class="name">MAIN</span><span class="badge standby" id="mainBadge">STANDBY</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== TELEMETRY ===================== -->
+  <div class="panel telemetry">
+    <div class="panel-head">
+      <div class="panel-title"><span class="dot"></span>TELEMETRY CORE</div>
+      <div class="panel-tag">GPS-01 / BARO-01 / IMU-01</div>
+    </div>
+    <div class="panel-body">
+      <div class="tele-grid">
+        <div class="tele-cell wide accent"><span class="lbl">GPS ALT</span><span class="num" id="tGpsAlt">0.0<small>m</small></span></div>
+        <div class="tele-cell wide"><span class="lbl">LAT</span><span class="num" id="tLat">0.000000</span></div>
+        <div class="tele-cell wide"><span class="lbl">LON</span><span class="num" id="tLon">0.000000</span></div>
+        <div class="tele-cell"><span class="lbl">BMP ALT</span><span class="num" id="tBmpAlt">0.0<small>m</small></span></div>
+        <div class="tele-cell"><span class="lbl">PRESSURE</span><span class="num" id="tPress">0.0<small>hPa</small></span></div>
+        <div class="tele-cell"><span class="lbl">BMP TEMP</span><span class="num" id="tBmpTemp">0.0<small>°C</small></span></div>
+        <div class="tele-cell"><span class="lbl">SATELLITES</span><span class="num" id="tSat">0</span></div>
+        <div class="tele-cell"><span class="lbl">TX #</span><span class="num" id="tTx">0</span></div>
+        <div class="tele-cell"><span class="lbl">GPS FIX</span><span class="num" id="tFix">NO FIX</span></div>
+        <div class="tele-cell wide">
+          <span class="lbl">ACCEL (m/s²)</span>
+          <div class="triaxis"><span><span class="ax-lbl">X</span><b id="tAx">0.00</b></span><span><span class="ax-lbl">Y</span><b id="tAy">0.00</b></span><span><span class="ax-lbl">Z</span><b id="tAz">0.00</b></span></div>
+        </div>
+        <div class="tele-cell wide">
+          <span class="lbl">GYRO (rad/s)</span>
+          <div class="triaxis"><span><span class="ax-lbl">X</span><b id="tGx">0.00</b></span><span><span class="ax-lbl">Y</span><b id="tGy">0.00</b></span><span><span class="ax-lbl">Z</span><b id="tGz">0.00</b></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== ROCKET VISUALIZATION ===================== -->
+  <div class="panel rocket">
+    <div class="panel-head">
+      <div class="panel-title"><span class="dot"></span>3D MISSION OVERVIEW</div>
+      <div class="panel-tag">NAV-02</div>
+    </div>
+    <div class="panel-body">
+      <div class="viz-wrap" id="vizWrap">
+        <div class="flight-vol-label">VIRTUAL FLIGHT VOLUME · SECTOR 04</div>
+        <div class="scanline"></div>
+        <canvas id="rocketCanvas" style="width:100%;height:100%;display:block;"></canvas>
+
+        <div class="attitude-readout" style="top:16px; right:16px; text-align:right;">
+          <div><span class="r-lbl">ROLL</span><br><span class="r-val" id="vRoll">0.0°</span></div>
+          <div><span class="r-lbl">PITCH</span><br><span class="r-val" id="vPitch">0.0°</span></div>
+          <div><span class="r-lbl">YAW</span><br><span class="r-val" id="vYaw">0.0°</span></div>
+        </div>
+        <div class="attitude-readout" style="bottom:16px; left:16px;">
+          <div><span class="r-lbl">ALTITUDE</span><br><span class="r-val" id="vAlt">0 m</span></div>
+        </div>
+        <div class="attitude-readout" style="bottom:16px; right:16px; text-align:right;">
+          <div><span class="r-lbl">VERTICAL VELOCITY</span><br><span class="r-val" id="vVspeed">0.0 m/s</span></div>
+        </div>
+        <div class="sys-labels">SYS-01 · TELEMETRY CORE · RECEIVER</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== RADIO ===================== -->
+  <div class="panel radio">
+    <div class="panel-head">
+      <div class="panel-title"><span class="dot"></span>RADIO LINK</div>
+      <div class="panel-tag">RAD-01</div>
+    </div>
+    <div class="panel-body">
+      <div class="radio-grid">
+        <div class="radio-cell"><span class="lbl">FREQUENCY</span><br><span class="num">0.000<small style="font-size:9px;color:var(--text-mid);"> MHz</small></span></div>
+        <div class="radio-cell"><span class="lbl">RSSI</span><br><span class="num" id="rRssi">0 dBm</span></div>
+        <div class="radio-cell"><span class="lbl">SNR</span><br><span class="num" id="rSnr">0.0 dB</span></div>
+        <div class="radio-cell"><span class="lbl">PACKET RATE</span><br><span class="num" id="rRate">0 Hz</span></div>
+        <div class="radio-cell" style="border-bottom:none;"><span class="lbl">PACKETS RX</span><br><span class="num" id="rRx">0</span></div>
+        <div class="radio-cell" style="border-bottom:none;"><span class="lbl">PACKETS LOST</span><br><span class="num" id="rLost">0</span></div>
+      </div>
+      <div style="margin-top:8px;font-size:8px;letter-spacing:1px;color:var(--text-dim);">LAST PACKET <span id="rLastPacket" style="color:var(--text-mid);">WAITING</span></div>
+      <div class="sig-wrap"><canvas id="sigChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- ===================== SYSTEM LOG ===================== -->
+  <div class="panel log">
+    <div class="panel-head">
+      <div class="panel-title"><span class="dot"></span>MISSION CONTROL</div>
+      <div class="panel-tag">SYS-01</div>
+    </div>
+    <div class="panel-body">
+      <div class="log-body" id="logBody"></div>
+    </div>
+  </div>
+
+  <!-- ===================== MAP ===================== -->
+  <div class="panel map">
+    <div class="panel-head">
+      <div class="panel-title"><span class="dot"></span>GPS COORDINATES</div>
+      <div class="panel-tag">GPS-01</div>
+    </div>
+    <div class="panel-body">
+      <canvas id="mapCanvas"></canvas>
+      <div class="map-overlay">
+        <div><span class="coord-lbl">LAT</span><br><span class="coord-val" id="mLat">0.000000</span></div>
+        <div><span class="coord-lbl">LON</span><br><span class="coord-val" id="mLon">0.000000</span></div>
+      </div>
+      <div class="map-legend">
+        <div class="row"><span class="swatch"></span>TRAJECTORY (ACTUAL)</div>
+        <div class="row"><span class="swatch dashed"></span>PROJECTED TRAJECTORY</div>
+        <div class="row"><span class="swatch dot"></span>CURRENT POSITION</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== GRAPHS ===================== -->
+  <div class="panel graphs">
+    <div class="panel-head">
+      <div class="panel-title"><span class="dot"></span>REAL-TIME INSTRUMENTATION</div>
+      <div class="panel-tag">TLM-04</div>
+    </div>
+    <div class="panel-body">
+      <div class="graph-cell"><div class="g-head"><span class="g-title">ALTITUDE (m)</span><span class="g-val" id="gAltVal">0</span></div></div>
+      <div class="graph-cell"><div class="g-head"><span class="g-title">VELOCITY (m/s)</span><span class="g-val" id="gVelVal">0.0</span></div></div>
+      <div class="graph-cell"><div class="g-head"><span class="g-title">ACCELERATION (G)</span><span class="g-val" id="gAccVal">0.0</span></div></div>
+      <div class="graph-cell"><div class="g-head"><span class="g-title">RSSI (dBm)</span><span class="g-val" id="gRssiVal">0</span></div></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* =========================================================================
+   NOVA GROUND STATION — CLEAN IDLE BUILD
+   -------------------------------------------------------------------------
+   No fake telemetry and no automatic flight simulation.
+
+   Startup state:
+     • PAD
+     • rocket on Blender podium
+     • engine OFF (engine geometry is not even created until BOOST)
+     • all sensor/radio/GPS values = 0 / waiting
+
+   Future telemetry can feed this page through:
+     NOVA.setConnectionState(true)
+     NOVA.setFlightState('BOOST')
+     NOVA.setTelemetry({...})
+     NOVA.ingestTelemetryLine(rawLine)
+   ========================================================================= */
+
+const $ = id => document.getElementById(id);
+const fmt1 = n => Number.isFinite(Number(n)) ? Number(n).toFixed(1) : '0.0';
+const fmt2 = n => Number.isFinite(Number(n)) ? Number(n).toFixed(2) : '0.00';
+const fmt6 = n => Number.isFinite(Number(n)) ? Number(n).toFixed(6) : '0.000000';
+const fmtSigned = n => {
+  const v = Number.isFinite(Number(n)) ? Number(n) : 0;
+  return (v > 0 ? '+' : '') + v.toFixed(1);
+};
+
+function pad2(n){ return String(n).padStart(2,'0'); }
+function metStr(totalSeconds){
+  const sec = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  return `${pad2(h)}:${pad2(m)}:${pad2(s)}`;
+}
+
+/* ---------- telemetry parser: available for the real receiver later ---------- */
+function parseTelemetryLine(line){
+  const data = {};
+  String(line).split('|').map(p => p.trim()).forEach(part => {
+    if(/^TX #/.test(part)) data.txNum = parseInt(part.replace('TX #','').trim(), 10) || 0;
+    else if(part === 'GPS FIX' || part === 'NO FIX') data.gpsFix = part === 'GPS FIX';
+    else if(part.startsWith('LAT:')) data.lat = parseFloat(part.split(':')[1]) || 0;
+    else if(part.startsWith('LON:')) data.lon = parseFloat(part.split(':')[1]) || 0;
+    else if(part.startsWith('GPS ALT:')) data.gpsAlt = parseFloat(part.split(':')[1]) || 0;
+    else if(part.startsWith('SAT:')) data.sat = parseInt(part.split(':')[1], 10) || 0;
+    else if(part.startsWith('BMP T:')) data.bmpTemp = parseFloat(part.split(':')[1]) || 0;
+    else if(part.startsWith('PRESS:')) data.press = parseFloat(part.split(':')[1]) || 0;
+    else if(part.startsWith('BMP ALT:')) data.bmpAlt = parseFloat(part.split(':')[1]) || 0;
+    else if(part.startsWith('ACCEL:')){
+      const vals = part.split(':')[1].split(',').map(v => parseFloat(v) || 0);
+      data.accel = {x: vals[0] || 0, y: vals[1] || 0, z: vals[2] || 0};
+    }
+    else if(part.startsWith('GYRO:')){
+      const vals = part.split(':')[1].split(',').map(v => parseFloat(v) || 0);
+      data.gyro = {x: vals[0] || 0, y: vals[1] || 0, z: vals[2] || 0};
+    }
+    else if(part.startsWith('RSSI:')){
+      data.rssi = parseFloat(part.split(':')[1]) || 0;
+    }
+    else if(part.startsWith('SNR:')){
+      data.snr = parseFloat(part.split(':')[1]) || 0;
+    }
+    else if(part.startsWith('RX:')){
+      data.packetsRx = parseInt(part.split(':')[1], 10) || 0;
+    }
+    else if(part.startsWith('LOST:')){
+      data.packetsLost = parseInt(part.split(':')[1], 10) || 0;
+    }
+  });
+  return data;
+}
+
+/* ---------- clean state ---------- */
+const telemetry = {
+  txNum: 0,
+  gpsFix: false,
+  lat: 0,
+  lon: 0,
+  gpsAlt: 0,
+  sat: 0,
+  bmpTemp: 0,
+  press: 0,
+  bmpAlt: 0,
+  accel: {x:0, y:0, z:0},
+  gyro: {x:0, y:0, z:0},
+  roll: 0,
+  pitch: 0,
+  yaw: 0,
+  vspeed: 0,
+  velocity: 0,
+  rssi: 0,
+  snr: 0,
+  packetsRx: 0,
+  packetsLost: 0,
+  packetRate: 0,
+  frequency: 0,
+  missionTime: 0,
+  flightState: 'PAD'
+};
+
+let connected = false;
+const FLIGHT_STATES = ['PAD','BOOST','COAST','APOGEE','DROGUE','MAIN','LANDED'];
+
+/* ---------- IMU attitude estimation ---------- */
+
+let attitudeInitialized = false;
+let lastAttitudeUpdate = null;
+
+let estimatedRoll = 0;
+let estimatedPitch = 0;
+let estimatedYaw = 0;
+
+// Gyro zero-offset calibration
+let gyroBiasX = 0;
+let gyroBiasY = 0;
+let gyroBiasZ = 0;
+
+let gyroCalSamples = 0;
+const GYRO_CAL_TARGET = 15;
+
+let gyroBiasSumX = 0;
+let gyroBiasSumY = 0;
+let gyroBiasSumZ = 0;
+
+function updateAttitudeFromIMU(){
+
+  const ax = telemetry.accel.x || 0;
+  const ay = telemetry.accel.y || 0;
+  const az = telemetry.accel.z || 0;
+
+  const gx = telemetry.gyro.x || 0;
+  const gy = telemetry.gyro.y || 0;
+  const gz = telemetry.gyro.z || 0;
+
+
+  if(gyroCalSamples < GYRO_CAL_TARGET){
+
+    gyroBiasSumX += gx;
+    gyroBiasSumY += gy;
+    gyroBiasSumZ += gz;
+
+    gyroCalSamples++;
+
+    if(gyroCalSamples === GYRO_CAL_TARGET){
+
+      gyroBiasX = gyroBiasSumX / GYRO_CAL_TARGET;
+      gyroBiasY = gyroBiasSumY / GYRO_CAL_TARGET;
+      gyroBiasZ = gyroBiasSumZ / GYRO_CAL_TARGET;
+
+      console.log("NOVA: gyro calibrated", {
+        x: gyroBiasX,
+        y: gyroBiasY,
+        z: gyroBiasZ
+      });
+
+      appendLog(
+        "IMU GYRO CALIBRATION COMPLETE",
+        "ok"
+      );
+    }
+
+    return;
+  }
+
+
+  const rollAccel =
+    Math.atan2(
+      ay,
+      az
+    ) * 180 / Math.PI;
+
+
+  const pitchAccel =
+    Math.atan2(
+      -ax,
+      Math.sqrt(
+        ay * ay +
+        az * az
+      )
+    ) * 180 / Math.PI;
+
+
+  // ----------------------------------------------------------
+  // Time between telemetry packets
+  // ----------------------------------------------------------
+
+  const now =
+    performance.now();
+
+  if(lastAttitudeUpdate === null){
+
+    lastAttitudeUpdate = now;
+
+    estimatedRoll =
+      rollAccel;
+
+    estimatedPitch =
+      pitchAccel;
+
+    estimatedYaw = 0;
+
+    attitudeInitialized = true;
+
+    return;
+  }
+
+  let dt =
+    (now - lastAttitudeUpdate) / 1000;
+
+  lastAttitudeUpdate =
+    now;
+
+
+  // Prevent huge jumps if communication pauses
+
+  dt =
+    Math.min(
+      Math.max(dt, 0),
+      1.5
+    );
+
+
+  const correctedGX =
+    gx - gyroBiasX;
+
+  const correctedGY =
+    gy - gyroBiasY;
+
+  const correctedGZ =
+    gz - gyroBiasZ;
+
+
+  const RAD_TO_DEG =
+    180 / Math.PI;
+
+  const alpha =
+    0.92;
+
+  estimatedRoll =
+    alpha *
+    (
+      estimatedRoll +
+      correctedGX *
+      RAD_TO_DEG *
+      dt
+    )
+    +
+    (1 - alpha) *
+    rollAccel;
+
+
+  estimatedPitch =
+    alpha *
+    (
+      estimatedPitch +
+      correctedGY *
+      RAD_TO_DEG *
+      dt
+    )
+    +
+    (1 - alpha) *
+    pitchAccel;
+
+
+  // MPU6050 has no magnetometer,
+  // so yaw is gyro integration only.
+
+  estimatedYaw +=
+    correctedGZ *
+    RAD_TO_DEG *
+    dt;
+
+
+  // Keep yaw in -180 → +180 range
+
+  if(estimatedYaw > 180)
+    estimatedYaw -= 360;
+
+  if(estimatedYaw < -180)
+    estimatedYaw += 360;
+
+
+  telemetry.roll =
+    estimatedRoll;
+
+  telemetry.pitch =
+    estimatedPitch;
+
+  telemetry.yaw =
+    estimatedYaw;
+}
+/* ---------- 3D scene ---------- */
+const rocketCanvas = $('rocketCanvas');
+const vizWrapEl = $('vizWrap');
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+camera.position.set(0, 0.4, 7);
+camera.lookAt(0, 0, 0);
+
+const renderer = new THREE.WebGLRenderer({canvas:rocketCanvas, antialias:true, alpha:true});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+function resizeRocketRenderer(){
+  const rect = vizWrapEl.getBoundingClientRect();
+  renderer.setSize(rect.width, rect.height, false);
+  camera.aspect = rect.width / Math.max(rect.height, 1);
+  camera.updateProjectionMatrix();
+}
+resizeRocketRenderer();
+window.addEventListener('resize', resizeRocketRenderer);
+
+const keyLight = new THREE.PointLight(0xffffff, 1.5, 30);
+keyLight.position.set(3, 4, 4);
+scene.add(keyLight);
+const fillLight = new THREE.PointLight(0xffffff, 0.7, 30);
+fillLight.position.set(-4, -2, -3);
+scene.add(fillLight);
+scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+
+// Decorative star field only; it carries no telemetry information.
+{
+  const starGeo = new THREE.BufferGeometry();
+  const starCount = 500;
+  const positions = new Float32Array(starCount * 3);
+  for(let i=0;i<starCount;i++){
+    // deterministic pseudo-grid distribution so nothing here simulates data
+    const a = i * 12.9898;
+    positions[i*3]   = ((Math.sin(a) * 43758.5453) % 1) * 20;
+    positions[i*3+1] = ((Math.sin(a+1.7) * 24634.6345) % 1) * 20;
+    positions[i*3+2] = ((Math.sin(a+3.1) * 13579.2468) % 1) * 20 - 8;
+  }
+  starGeo.setAttribute('position', new THREE.BufferAttribute(positions,3));
+  scene.add(new THREE.Points(
+    starGeo,
+    new THREE.PointsMaterial({color:0x1a4a55,size:0.035,transparent:true,opacity:0.7})
+  ));
+}
+
+for(let i=1;i<=3;i++){
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(i*1.1, i*1.1+0.012, 64),
+    new THREE.MeshBasicMaterial({color:0x00e0ff,transparent:true,opacity:0.10,side:THREE.DoubleSide})
+  );
+  ring.rotation.x = Math.PI/2;
+  ring.position.y = -2.1;
+  scene.add(ring);
+}
+
+const rocketGroup = new THREE.Group();
+scene.add(rocketGroup);
+let rocketModel = null;
+let podiumRoot = null;
+
+const loader = new THREE.GLTFLoader();
+loader.load(
+  'RocketModel.glb',
+  (gltf) => {
+    rocketModel = gltf.scene;
+
+    // Keep the Blender podium, but detach it from the vehicle so it never flies.
+    const podium = rocketModel.getObjectByName('Podium');
+    if(podium && podium.parent) podium.parent.remove(podium);
+
+    rocketModel.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(rocketModel);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const desiredHeight = 4.2;
+    const scale = desiredHeight / Math.max(size.y, 0.0001);
+
+    rocketModel.scale.setScalar(scale);
+    rocketModel.position.copy(center).multiplyScalar(-scale);
+    rocketGroup.add(rocketModel);
+
+    if(podium){
+      podiumRoot = new THREE.Group();
+      podiumRoot.scale.setScalar(scale);
+      podiumRoot.position.copy(center).multiplyScalar(-scale);
+      podiumRoot.add(podium);
+      scene.add(podiumRoot);
+    }
+
+    applyFlightVisuals();
+    console.log('NOVA: RocketModel.glb loaded');
+  },
+  undefined,
+  (error) => console.error('NOVA: failed to load RocketModel.glb', error)
+);
+
+/* ---------- engine: DOES NOT EXIST until BOOST ---------- */
+let engineGroup = null;
+let flame = null;
+let flameCore = null;
+let exhaust = null;
+let exhaustVel = [];
+const EXHAUST_COUNT = 90;
+
+function createEngineEffects(){
+  if(engineGroup) return;
+
+  engineGroup = new THREE.Group();
+
+  const flameMat = new THREE.MeshBasicMaterial({
+    color:0xDC143C, // CRIMSON RED
+    transparent:true,
+    opacity:0.92,
+    blending:THREE.AdditiveBlending,
+    depthWrite:false
+  });
+  flame = new THREE.Mesh(new THREE.ConeGeometry(0.28,1.0,20,1,true), flameMat);
+  flame.position.y = -2.30;
+  flame.rotation.x = Math.PI;
+  engineGroup.add(flame);
+
+  const coreMat = new THREE.MeshBasicMaterial({
+    color:0xFF234F,
+    transparent:true,
+    opacity:0.95,
+    blending:THREE.AdditiveBlending,
+    depthWrite:false
+  });
+  flameCore = new THREE.Mesh(new THREE.ConeGeometry(0.13,0.62,18,1,true), coreMat);
+  flameCore.position.y = -2.13;
+  flameCore.rotation.x = Math.PI;
+  engineGroup.add(flameCore);
+
+  const exhaustGeo = new THREE.BufferGeometry();
+  const exhaustPos = new Float32Array(EXHAUST_COUNT * 3);
+  exhaustVel = [];
+  for(let i=0;i<EXHAUST_COUNT;i++){
+    exhaustPos[i*3] = 0;
+    exhaustPos[i*3+1] = -2.55;
+    exhaustPos[i*3+2] = 0;
+    exhaustVel.push({y:-(0.02 + (i%11)*0.001), spread:((i%7)-3)*0.0015, age:(i%100)/100});
+  }
+  exhaustGeo.setAttribute('position', new THREE.BufferAttribute(exhaustPos,3));
+  exhaust = new THREE.Points(exhaustGeo, new THREE.PointsMaterial({
+    color:0xDC143C,
+    size:0.06,
+    transparent:true,
+    opacity:0.58,
+    blending:THREE.AdditiveBlending,
+    depthWrite:false
+  }));
+  engineGroup.add(exhaust);
+  rocketGroup.add(engineGroup);
+}
+
+function destroyEngineEffects(){
+  // Keep it hidden after first use; before first BOOST there is literally no flame mesh.
+  if(engineGroup) engineGroup.visible = false;
+}
+
+function animateExhaust(){
+  if(!exhaust) return;
+  const pos = exhaust.geometry.attributes.position;
+  for(let i=0;i<EXHAUST_COUNT;i++){
+    const v = exhaustVel[i];
+    v.age -= 0.02;
+    if(v.age <= 0){
+      v.age = 1;
+      pos.setXYZ(i, ((i%5)-2)*0.008, -2.35, ((i%3)-1)*0.008);
+    } else {
+      pos.setY(i, pos.getY(i) + v.y);
+      pos.setX(i, pos.getX(i) + v.spread);
+    }
+  }
+  pos.needsUpdate = true;
+}
+
+function updateFlightStateUI(state){
+  const activeIndex = FLIGHT_STATES.indexOf(state);
+  document.querySelectorAll('#flightList li').forEach(li => {
+    const i = FLIGHT_STATES.indexOf(li.dataset.state);
+    li.classList.remove('active','passed');
+    if(i < activeIndex) li.classList.add('passed');
+    if(i === activeIndex) li.classList.add('active');
+  });
+
+  const drogueFired = ['DROGUE','MAIN','LANDED'].includes(state);
+  const mainFired = ['MAIN','LANDED'].includes(state);
+  $('drogueBadge').textContent = drogueFired ? 'DEPLOYED' : 'STANDBY';
+  $('drogueBadge').className = 'badge ' + (drogueFired ? 'fired' : 'standby');
+  $('mainBadge').textContent = mainFired ? 'DEPLOYED' : 'STANDBY';
+  $('mainBadge').className = 'badge ' + (mainFired ? 'fired' : 'standby');
+}
+
+function applyFlightVisuals(){
+  const state = telemetry.flightState;
+  const onPad = state === 'PAD';
+  const boosting = state === 'BOOST';
+
+  if(podiumRoot) podiumRoot.visible = onPad;
+
+  if(boosting){
+    createEngineEffects();
+    engineGroup.visible = true;
+  } else {
+    destroyEngineEffects();
+  }
+
+  updateFlightStateUI(state);
+}
+
+function updateRocketScene(){
+
+  rocketGroup.rotation.z =
+    THREE.MathUtils.degToRad(
+      telemetry.roll || 0
+    );
+
+  rocketGroup.rotation.x =
+    THREE.MathUtils.degToRad(
+      telemetry.pitch || 0
+    );
+
+  rocketGroup.rotation.y =
+    THREE.MathUtils.degToRad(
+      telemetry.yaw || 0
+    );
+}
+
+let frame = 0;
+function renderRocketFrame(){
+  frame++;
+  if(engineGroup && engineGroup.visible && flame && flameCore){
+    const flicker = 0.83 + Math.sin(frame*0.6)*0.08;
+    flame.scale.set(flicker, 1.0 + Math.sin(frame*0.43)*0.10, flicker);
+    flameCore.scale.set(flicker*0.88, 1.0 + Math.sin(frame*0.51)*0.08, flicker*0.88);
+    animateExhaust();
+  }
+
+  // Viewer orbit only; the rocket itself stays upright on PAD.
+  const t = frame * 0.0022;
+  camera.position.x = Math.sin(t) * 7;
+  camera.position.z = Math.cos(t) * 7;
+  camera.position.y = 0.6 + Math.sin(t*1.3)*0.3;
+  camera.lookAt(0,0.1,0);
+  renderer.render(scene,camera);
+  requestAnimationFrame(renderRocketFrame);
+}
+renderRocketFrame();
+
+/* ---------- map: blank until GPS data arrives ---------- */
+const mapCanvas = $('mapCanvas');
+const mapCtx = mapCanvas.getContext('2d');
+function resizeMap(){
+  const rect = mapCanvas.parentElement.getBoundingClientRect();
+  mapCanvas.width = Math.max(1, Math.floor(rect.width));
+  mapCanvas.height = Math.max(1, Math.floor(rect.height));
+  drawMap();
+}
+window.addEventListener('resize', resizeMap);
+
+function drawMap(){
+  const w = mapCanvas.width, h = mapCanvas.height;
+  mapCtx.clearRect(0,0,w,h);
+  mapCtx.fillStyle = '#050809';
+  mapCtx.fillRect(0,0,w,h);
+
+  mapCtx.strokeStyle = 'rgba(0,224,255,0.05)';
+  mapCtx.lineWidth = 1;
+  const step = 26;
+  for(let x=0;x<w;x+=step){mapCtx.beginPath();mapCtx.moveTo(x,0);mapCtx.lineTo(x,h);mapCtx.stroke();}
+  for(let y=0;y<h;y+=step){mapCtx.beginPath();mapCtx.moveTo(0,y);mapCtx.lineTo(w,y);mapCtx.stroke();}
+
+  const ccx=w/2, ccy=h/2;
+  mapCtx.strokeStyle = 'rgba(0,224,255,0.09)';
+  for(let r=40;r<Math.max(w,h);r+=60){mapCtx.beginPath();mapCtx.arc(ccx,ccy,r,0,Math.PI*2);mapCtx.stroke();}
+
+  if(!telemetry.gpsFix || (!telemetry.lat && !telemetry.lon)){
+    mapCtx.fillStyle = 'rgba(130,170,181,0.65)';
+    mapCtx.font = '10px monospace';
+    mapCtx.textAlign = 'center';
+    mapCtx.fillText('WAITING FOR GPS', ccx, ccy);
+    mapCtx.textAlign = 'start';
+    return;
+  }
+
+  mapCtx.fillStyle = '#00e0ff';
+  mapCtx.shadowColor = '#00e0ff';
+  mapCtx.shadowBlur = 8;
+  mapCtx.beginPath();
+  mapCtx.arc(ccx,ccy,5,0,Math.PI*2);
+  mapCtx.fill();
+  mapCtx.shadowBlur = 0;
+  mapCtx.fillStyle = '#d9f7ff';
+  mapCtx.font = '9px monospace';
+  mapCtx.fillText('CURRENT POSITION', ccx+9, ccy+3);
+}
+
+/* ---------- charts: empty until real data arrives ---------- */
+Chart.defaults.font.family = "'JetBrains Mono','Consolas',monospace";
+Chart.defaults.font.size = 9;
+Chart.defaults.color = 'rgba(130,170,181,0.75)';
+function makeSeriesChart(ctx,color){
+  return new Chart(ctx,{
+    type:'line',
+    data:{labels:[],datasets:[{data:[],borderColor:color,borderWidth:1.5,pointRadius:0,tension:0.35,fill:true,backgroundColor:color.replace('1)','0.08)')}]},
+    options:{animation:false,responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{enabled:false}},scales:{x:{display:false},y:{grid:{color:'rgba(0,224,255,0.06)'},ticks:{display:true,maxTicksLimit:3}}}}
+  });
+}
+const sigChart = makeSeriesChart($('sigChart'),'rgba(0,224,255,1)');
+const MAX_POINTS = 40;
+function pushPoint(chart,value){
+  chart.data.labels.push('');
+  chart.data.datasets[0].data.push(Number(value)||0);
+  if(chart.data.labels.length>MAX_POINTS){chart.data.labels.shift();chart.data.datasets[0].data.shift();}
+  chart.update('none');
+}
+
+/* ---------- mission log ---------- */
+const logBody = $('logBody');
+function clearLog(){ logBody.innerHTML=''; }
+function appendLog(msg,cls=''){
+  const line=document.createElement('div');
+  line.className='log-line'+(cls?' '+cls:'');
+  line.innerHTML=`<span class="ts">[--:--:--.---]</span> ${msg}`;
+  logBody.appendChild(line);
+  logBody.scrollTop=logBody.scrollHeight;
+}
+clearLog();
+appendLog('WAITING FOR TELEMETRY CONNECTION');
+
+/* ---------- UI rendering ---------- */
+function setConnectionState(isConnected){
+  connected = !!isConnected;
+  $('hSysStatus').textContent = connected ? 'ONLINE' : 'WAITING';
+  $('hSysStatus').className = 'val' + (connected ? ' ok' : '');
+  $('hRadioLink').textContent = connected ? 'CONNECTED' : 'WAITING';
+  $('hRadioLink').className = 'val' + (connected ? ' ok' : '');
+  $('linkState').lastChild.textContent = connected ? ' LINK ACTIVE' : ' WAITING';
+  $('linkState').style.color = connected ? 'var(--ok)' : 'var(--text-mid)';
+  $('linkPulse').style.background = connected ? 'var(--ok)' : 'var(--text-dim)';
+  $('linkPulse').style.boxShadow = connected ? '0 0 6px var(--ok)' : 'none';
+  $('linkPulse').style.animation = connected ? 'pulse 1.6s infinite' : 'none';
+}
+
+function renderTelemetry(addChartPoint=false){
+  $('hSats').textContent = String(telemetry.sat||0).padStart(2,'0');
+  $('hGpsFix').textContent = telemetry.gpsFix ? 'FIX' : 'NO FIX';
+  $('hGpsFix').className = 'val' + (telemetry.gpsFix ? ' ok' : '');
+  $('hMet').textContent = metStr(telemetry.missionTime);
+  const loss = telemetry.packetsRx > 0 ? (telemetry.packetsLost/telemetry.packetsRx*100) : 0;
+  $('hPloss').textContent = loss.toFixed(1)+'%';
+
+  $('tGpsAlt').innerHTML = fmt1(telemetry.gpsAlt)+'<small>m</small>';
+  $('tLat').textContent = fmt6(telemetry.lat);
+  $('tLon').textContent = fmt6(telemetry.lon);
+  $('tBmpAlt').innerHTML = fmt1(telemetry.bmpAlt)+'<small>m</small>';
+  $('tPress').innerHTML = fmt1(telemetry.press)+'<small>hPa</small>';
+  $('tBmpTemp').innerHTML = fmt1(telemetry.bmpTemp)+'<small>°C</small>';
+  $('tSat').textContent = String(telemetry.sat||0);
+  $('tTx').textContent = String(telemetry.txNum||0);
+  $('tFix').textContent = telemetry.gpsFix ? 'GPS FIX' : 'NO FIX';
+  $('tAx').textContent = fmt2(telemetry.accel.x);
+  $('tAy').textContent = fmt2(telemetry.accel.y);
+  $('tAz').textContent = fmt2(telemetry.accel.z);
+  $('tGx').textContent = fmt2(telemetry.gyro.x);
+  $('tGy').textContent = fmt2(telemetry.gyro.y);
+  $('tGz').textContent = fmt2(telemetry.gyro.z);
+
+  $('vRoll').textContent = fmtSigned(telemetry.roll)+'°';
+  $('vPitch').textContent = fmtSigned(telemetry.pitch)+'°';
+  $('vYaw').textContent = fmtSigned(telemetry.yaw)+'°';
+  $('vAlt').textContent = Math.round(telemetry.gpsAlt||0).toLocaleString()+' m';
+  $('vVspeed').textContent = fmtSigned(telemetry.vspeed)+' m/s';
+
+  $('rRssi').textContent = String(telemetry.rssi||0)+' dBm';
+  $('rSnr').textContent = fmtSigned(telemetry.snr)+' dB';
+  $('rRate').textContent = fmt1(telemetry.packetRate).replace('.0','')+' Hz';
+  $('rRx').textContent = Number(telemetry.packetsRx||0).toLocaleString();
+  $('rLost').textContent = Number(telemetry.packetsLost||0).toLocaleString();
+  $('rLastPacket').textContent = connected ? metStr(telemetry.missionTime) : 'WAITING';
+
+  $('mLat').textContent = fmt6(telemetry.lat);
+  $('mLon').textContent = fmt6(telemetry.lon);
+
+  const accelMag = Math.sqrt((telemetry.accel.x||0)**2 + (telemetry.accel.y||0)**2 + (telemetry.accel.z||0)**2);
+  $('gAltVal').textContent = String(Math.round(telemetry.bmpAlt||0));
+  $('gVelVal').textContent = fmt1(telemetry.velocity);
+  $('gAccVal').textContent = fmt1(accelMag);
+  $('gRssiVal').textContent = String(telemetry.rssi||0);
+
+  if(addChartPoint){
+    // Only the compact radio-link history remains as a chart.
+    // Bottom instrumentation is numbers-only for much lower render overhead.
+    pushPoint(sigChart,telemetry.rssi);
+  }
+
+  updateRocketScene();
+  applyFlightVisuals();
+  drawMap();
+}
+
+function setFlightState(state){
+  if(!FLIGHT_STATES.includes(state)){
+    console.warn('NOVA: invalid flight state', state);
+    return;
+  }
+  telemetry.flightState = state;
+  applyFlightVisuals();
+}
+
+function setTelemetry(data={}){
+
+  if(data.accel)
+    telemetry.accel = {
+      ...telemetry.accel,
+      ...data.accel
+    };
+
+  if(data.gyro)
+    telemetry.gyro = {
+      ...telemetry.gyro,
+      ...data.gyro
+    };
+
+
+  Object.keys(data).forEach(k => {
+
+    if(
+      k !== 'accel' &&
+      k !== 'gyro' &&
+      k !== 'flightState' &&
+      k in telemetry
+    ){
+      telemetry[k] =
+        data[k];
+    }
+  });
+
+
+  // Calculate roll / pitch / yaw
+  // from real MPU6050 telemetry.
+
+  if(data.accel || data.gyro){
+    updateAttitudeFromIMU();
+  }
+
+
+  if(data.flightState)
+    setFlightState(
+      data.flightState
+    );
+
+
+  setConnectionState(true);
+
+  renderTelemetry(true);
+}
+
+function ingestTelemetryLine(line){
+  setTelemetry(parseTelemetryLine(line));
+}
+
+/* ---------- USB Web Serial connection ---------- */
+let serialPort = null;
+let serialReader = null;
+let serialKeepReading = false;
+
+function setConnectButtonState(isConnected){
+  const btn = $('connectSerialBtn');
+  if(!btn) return;
+  btn.textContent = isConnected ? 'GROUND STATION CONNECTED' : 'CONNECT GROUND STATION';
+  btn.classList.toggle('connected', !!isConnected);
+}
+
+async function connectGroundStation(){
+  if(!('serial' in navigator)){
+    alert('Web Serial is not supported in this browser. Open NOVA in Google Chrome or Microsoft Edge.');
+    return;
+  }
+
+  // If already connected, do nothing.
+  if(serialPort && serialPort.readable){
+    return;
+  }
+
+  try{
+    serialPort = await navigator.serial.requestPort();
+    await serialPort.open({baudRate:115200});
+
+    serialKeepReading = true;
+    setConnectButtonState(true);
+    appendLog('GROUND STATION USB CONNECTED','ok');
+    setConnectionState(true);
+
+    await readGroundStationSerial();
+  } catch(error){
+    console.error('NOVA serial connection error:', error);
+    appendLog('GROUND STATION CONNECTION FAILED','warn');
+    setConnectButtonState(false);
+    setConnectionState(false);
+
+    try{
+      if(serialPort && serialPort.readable === null) await serialPort.close();
+    } catch(_){}
+    serialPort = null;
+  }
+}
+
+async function readGroundStationSerial(){
+  if(!serialPort || !serialPort.readable) return;
+
+  const decoder = new TextDecoder();
+  serialReader = serialPort.readable.getReader();
+  let buffer = '';
+
+  try{
+    while(serialKeepReading){
+      const {value, done} = await serialReader.read();
+      if(done) break;
+      if(!value) continue;
+
+      buffer += decoder.decode(value,{stream:true});
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || '';
+
+      for(let line of lines){
+        line = line.trim();
+        if(!line) continue;
+
+        // Receiver startup / diagnostic messages begin with '#'.
+        if(line.startsWith('#')){
+          console.log('GROUND:', line);
+          continue;
+        }
+
+        // Only telemetry records should update NOVA.
+        if(line.startsWith('TX #')){
+          console.log('TELEMETRY:', line);
+          NOVA.ingestTelemetryLine(line);
+        }
+      }
+    }
+  } catch(error){
+    console.error('NOVA serial read error:', error);
+    appendLog('GROUND STATION SERIAL READ ERROR','warn');
+  } finally{
+    try{
+      if(serialReader){
+        serialReader.releaseLock();
+      }
+    } catch(_){}
+    serialReader = null;
+    serialKeepReading = false;
+    setConnectButtonState(false);
+    setConnectionState(false);
+  }
+}
+
+$('connectSerialBtn').addEventListener('click', connectGroundStation);
+
+// Future integration API. Nothing calls these automatically.
+window.NOVA = {
+  setConnectionState,
+  setFlightState,
+  setTelemetry,
+  ingestTelemetryLine,
+  parseTelemetryLine,
+  connectGroundStation,
+  telemetry
+};
+
+// True idle startup. NO timers. NO generated sensor values. NO flame.
+setConnectionState(false);
+setConnectButtonState(false);
+setFlightState('PAD');
+renderTelemetry(false);
+resizeMap();
+</script>
+</body>
+</html>
