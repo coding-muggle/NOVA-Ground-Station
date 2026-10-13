@@ -1,0 +1,32 @@
+# macOS
+.DS_Store
+._*
+
+# Temporary and generated files
+*.tmp
+*.temp
+*.log
+*.swp
+*.swo
+*~
+__pycache__/
+*.py[cod]
+
+# Local editor and IDE settings
+.vscode/
+.idea/
+
+# Local environment and credential files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+secrets.json
+
+# Arduino build output
+build/
+.pio/
